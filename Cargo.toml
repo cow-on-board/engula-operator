@@ -1,15 +1,15 @@
 [package]
-name = "controller"
-version = "0.11.4"
-authors = ["clux <sszynrae@gmail.com>"]
+name = "engula-operator"
+version = "0.0.1"
+authors = ["Ce Gao <ce.gao@outlook.com>"]
 edition = "2021"
-default-run = "controller"
+default-run = "engula-operator"
 license = "Apache-2.0"
 publish = false
 
 [[bin]]
 doc = false
-name = "controller"
+name = "engula-operator"
 path = "src/main.rs"
 
 [[bin]]
