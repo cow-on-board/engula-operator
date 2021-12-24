@@ -1,7 +1,8 @@
 use crate::{telemetry, Error, Result};
+use crate::{api::journal::*};
 use chrono::prelude::*;
 use futures::{future::BoxFuture, FutureExt, StreamExt};
-use k8s_openapi::api::core::v1::ObjectReference;
+use k8s_openapi::api::{core::v1::ObjectReference, apps::v1::Deployment};
 use kube::{
     api::{Api, ListParams, Patch, PatchParams, ResourceExt},
     client::Client,
@@ -15,8 +16,7 @@ use prometheus::{
     default_registry, proto::MetricFamily, register_histogram_vec, register_int_counter, HistogramOpts,
     HistogramVec, IntCounter,
 };
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::json;
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
@@ -24,21 +24,6 @@ use tokio::{
     time::{Duration, Instant},
 };
 use tracing::{debug, error, event, field, info, instrument, trace, warn, Level, Span};
-
-/// Our Journal custom resource spec
-#[derive(CustomResource, Deserialize, Serialize, Clone, Debug, JsonSchema)]
-#[kube(kind = "Journal", group = "engula.io", version = "v1alpha1", namespaced)]
-#[kube(status = "JournalStatus")]
-pub struct JournalSpec {
-    name: String,
-    info: String,
-}
-
-#[derive(Deserialize, Serialize, Clone, Debug, JsonSchema)]
-pub struct JournalStatus {
-    is_bad: bool,
-    //last_updated: Option<DateTime<Utc>>,
-}
 
 // Context for our reconciler
 #[derive(Clone)]
@@ -63,14 +48,14 @@ async fn reconcile(journal: Journal, ctx: Context<Data>) -> Result<ReconcilerAct
     let recorder = Recorder::new(client.clone(), reporter, journal.object_ref(&()));
     let name = ResourceExt::name(&journal);
     let ns = ResourceExt::namespace(&journal).expect("journal is namespaced");
-    let journals: Api<Journal> = Api::namespaced(client, &ns);
+    let journals: Api<Journal> = Api::namespaced(client.clone(), &ns);
+    let deploys: Api<Deployment> = Api::namespaced(client.clone(), &ns);
 
     let new_status = Patch::Apply(json!({
         "apiVersion": "engula.io/v1alpha1",
         "kind": "Journal",
         "status": JournalStatus {
-            is_bad: journal.spec.info.contains("bad"),
-            //last_updated: Some(Utc::now()),
+            deployment_status: None,
         }
     }));
     let ps = PatchParams::apply("cntrlr").force();
@@ -78,19 +63,23 @@ async fn reconcile(journal: Journal, ctx: Context<Data>) -> Result<ReconcilerAct
         .patch_status(&name, &ps, &new_status)
         .await
         .map_err(Error::KubeError)?;
+    let current = match deploys.get(&name).await {
+        Ok(current) => Some(current),
+        Err(kube::KubeError::Api(e)) => None,
+    };
 
-    if journal.spec.info.contains("bad") {
-        recorder
-            .publish(Event {
-                type_: EventType::Normal,
-                reason: "BadJournal".into(),
-                note: Some(format!("Sending `{}` to detention", name)),
-                action: "Correcting".into(),
-                secondary: None,
-            })
-            .await
-            .map_err(Error::KubeError)?;
-    }
+    // if journal.spec.info.contains("bad") {
+    //     recorder
+    //         .publish(Event {
+    //             type_: EventType::Normal,
+    //             reason: "BadJournal".into(),
+    //             note: Some(format!("Sending `{}` to detention", name)),
+    //             action: "Correcting".into(),
+    //             secondary: None,
+    //         })
+    //         .await
+    //         .map_err(Error::KubeError)?;
+    // }
 
     let duration = start.elapsed().as_millis() as f64 / 1000.0;
     //let ex = Exemplar::new_with_labels(duration, HashMap::from([("trace_id".to_string(), trace_id)]);
