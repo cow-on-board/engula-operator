@@ -13,12 +13,14 @@ pub enum Error {
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// State machinery for kube, as exposeable to actix
-pub mod manager;
-pub use manager::Manager;
+// api
+pub mod api;
+// Generated type, for crdgen
+pub use api::journal::Journal;
 
-/// Generated type, for crdgen
-pub use manager::Journal;
+/// State machinery for kube, as exposeable to actix
+pub mod operator;
+pub use operator::journal::Manager;
 
 /// Log and trace integrations
 pub mod telemetry;
