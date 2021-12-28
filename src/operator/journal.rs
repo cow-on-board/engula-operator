@@ -4,6 +4,7 @@ use chrono::prelude::*;
 use futures::{future::BoxFuture, FutureExt, StreamExt};
 use k8s_openapi::api::{core::v1::ObjectReference, apps::v1::Deployment};
 use kube::{
+    Error as kubeerror,
     api::{Api, ListParams, Patch, PatchParams, ResourceExt},
     client::Client,
     runtime::{
@@ -65,7 +66,8 @@ async fn reconcile(journal: Journal, ctx: Context<Data>) -> Result<ReconcilerAct
         .map_err(Error::KubeError)?;
     let current = match deploys.get(&name).await {
         Ok(current) => Some(current),
-        Err(kube::KubeError::Api(e)) => None,
+        Err(kube::Error::Api(e)) => None,
+        _ => None // should actually throw the err
     };
 
     // if journal.spec.info.contains("bad") {
