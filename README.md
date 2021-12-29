@@ -10,6 +10,14 @@ This project is to provide a declarative way to manage [engula][] clusters on Ku
 
 Please refer to [engula/engula#214](https://github.com/engula/engula/discussions/214) for more details.
 
+## Benefits to the TiDB Community
+
+The TiDB server has a distributed architecture with flexible and elastic scalability. This architecture supports pluggable storage drivers and engines, which powers you to customize your database solutions based on your own business requirements. 
+
+Engula is one of the potential storage engines that can serve data read/write requests from the TiDB servers. Engula is designed to be elastic, adaptive and extensible. The combination offers a totally new experience in addition to the many new features.
+
+There is a TiDB operator to deploy TiDB clusters on Kubernetes, which uses TiKV as the default storage layer. The [engula-operator][] is proposed to bridge the gap between TiDB and Engula.
+
 ## Design
 
 [kube-rs] will be used to manage 6 CRDs:
