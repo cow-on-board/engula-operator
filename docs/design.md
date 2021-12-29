@@ -52,11 +52,13 @@ metadata:
     app: engula
 spec:
   journal:
-    namespace: default
-    name: sample
+    ref:
+      namespace: default
+      name: sample
   storage:
-    namespace: default
-    name: sample
+    ref:
+      namespace: default
+      name: sample
   template:
     metadata:
       labels:
