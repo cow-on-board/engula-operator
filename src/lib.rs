@@ -10,6 +10,9 @@ pub enum Error {
 
     #[error("SerializationError: {0}")]
     SerializationError(#[source] serde_json::Error),
+
+    #[error("MissingObjectKey: {0}")]
+    MissingObjectKey(&'static str),
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
