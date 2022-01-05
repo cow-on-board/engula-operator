@@ -1,0 +1,17 @@
+apiVersion: engula.io/v1alpha1
+kind: Storage
+metadata:
+  name: sample
+  labels:
+    app: engula
+spec:
+  template:
+    metadata:
+      labels:
+        app: engula
+    spec:
+      containers:
+        - name: engula
+          image: busybox
+          ports:
+            - containerPort: 80
