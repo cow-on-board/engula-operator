@@ -3,9 +3,10 @@ use crate::{api::journal::*};
 use chrono::prelude::*;
 use futures::{future::BoxFuture, FutureExt, StreamExt};
 use k8s_openapi::api::{core::v1::ObjectReference, apps::v1::Deployment};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta};
 use kube::{
     Error as kubeerror,
-    api::{Api, ListParams, Patch, PatchParams, ResourceExt},
+    api::{Api, ListParams, Patch, PatchParams, ResourceExt, PostParams},
     client::Client,
     runtime::{
         controller::{Context, Controller, ReconcilerAction},
@@ -19,7 +20,7 @@ use prometheus::{
 };
 use serde::Serialize;
 use serde_json::json;
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 use tokio::{
     sync::RwLock,
     time::{Duration, Instant},
@@ -52,6 +53,15 @@ async fn reconcile(journal: Journal, ctx: Context<Data>) -> Result<ReconcilerAct
     let journals: Api<Journal> = Api::namespaced(client.clone(), &ns);
     let deploys: Api<Deployment> = Api::namespaced(client.clone(), &ns);
 
+    let duration = start.elapsed().as_millis() as f64 / 1000.0;
+    ctx.get_ref()
+        .metrics
+        .reconcile_duration
+        .with_label_values(&[])
+        .observe(duration);
+    ctx.get_ref().metrics.handled_events.inc();
+    info!("Reconciled Journal \"{}\" in {}", name, ns);
+
     let new_status = Patch::Apply(json!({
         "apiVersion": "engula.io/v1alpha1",
         "kind": "Journal",
@@ -64,10 +74,12 @@ async fn reconcile(journal: Journal, ctx: Context<Data>) -> Result<ReconcilerAct
         .patch_status(&name, &ps, &new_status)
         .await
         .map_err(Error::KubeError)?;
-    let current = match deploys.get(&name).await {
-        Ok(current) => Some(current),
-        Err(kube::Error::Api(e)) => None,
-        _ => None // should actually throw the err
+    return match deploys.get(&name).await {
+        Ok(current) => update(),
+        Err(kube::Error::Api(e)) => create(deploys, journal).await,
+        _ => Ok(ReconcilerAction{
+            requeue_after: Some(Duration::from_secs(5)),
+        })
     };
 
     // if journal.spec.info.contains("bad") {
@@ -82,23 +94,39 @@ async fn reconcile(journal: Journal, ctx: Context<Data>) -> Result<ReconcilerAct
     //         .await
     //         .map_err(Error::KubeError)?;
     // }
-
-    let duration = start.elapsed().as_millis() as f64 / 1000.0;
-    //let ex = Exemplar::new_with_labels(duration, HashMap::from([("trace_id".to_string(), trace_id)]);
-    ctx.get_ref()
-        .metrics
-        .reconcile_duration
-        .with_label_values(&[])
-        .observe(duration);
-    //.observe_with_exemplar(duration, ex);
-    ctx.get_ref().metrics.handled_events.inc();
-    info!("Reconciled Journal \"{}\" in {}", name, ns);
-
-    // If no events were received, check back every 30 minutes
-    Ok(ReconcilerAction {
-        requeue_after: Some(Duration::from_secs(3600 / 2)),
-    })
 }
+
+fn update() -> Result<ReconcilerAction, Error> {
+    Ok(
+        ReconcilerAction {
+            requeue_after: Some(Duration::from_secs(3600 / 2)),
+        }
+    )
+}
+
+async fn create(deploys: Api<Deployment>, journal: Journal) -> Result<ReconcilerAction, Error> {
+    let name = ResourceExt::name(&journal);
+    let ns = ResourceExt::namespace(&journal).expect("journal is namespaced");
+    let deploy = Deployment {
+        metadata: ObjectMeta{
+            name: Some(name.clone()),
+            namespace: Some(ns.clone()),
+            labels: Some(BTreeMap::new()),
+            annotations: Some(BTreeMap::new()),
+            ..Default::default()
+        },
+        spec: Default::default(),
+        status: Default::default(),
+    };
+    let ps = PostParams::default();
+    let _o = deploys.create(&ps, &deploy).await.map_err(Error::KubeError)?;
+    Ok(
+        ReconcilerAction {
+            requeue_after: Some(Duration::from_secs(3600 / 2)),
+        }
+    )
+}
+
 fn error_policy(error: &Error, _ctx: Context<Data>) -> ReconcilerAction {
     warn!("reconcile failed: {:?}", error);
     ReconcilerAction {
