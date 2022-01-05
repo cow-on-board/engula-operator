@@ -2,8 +2,8 @@ use crate::{telemetry, Error, Result};
 use crate::{api::journal::*};
 use chrono::prelude::*;
 use futures::{future::BoxFuture, FutureExt, StreamExt};
-use k8s_openapi::api::{core::v1::ObjectReference, apps::v1::Deployment};
-use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta};
+use k8s_openapi::api::{core::v1::*, apps::v1::*};
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::*;
 use kube::{
     Error as kubeerror,
     api::{Api, ListParams, Patch, PatchParams, ResourceExt, PostParams},
@@ -77,6 +77,7 @@ async fn reconcile(journal: Journal, ctx: Context<Data>) -> Result<ReconcilerAct
     return match deploys.get(&name).await {
         Ok(current) => update(),
         Err(kube::Error::Api(e)) => create(deploys, journal).await,
+        // TODO(gaocegege): Use error_policy here.
         _ => Ok(ReconcilerAction{
             requeue_after: Some(Duration::from_secs(5)),
         })
@@ -115,8 +116,44 @@ async fn create(deploys: Api<Deployment>, journal: Journal) -> Result<Reconciler
             annotations: Some(BTreeMap::new()),
             ..Default::default()
         },
-        spec: Default::default(),
-        status: Default::default(),
+        spec: Some(DeploymentSpec {
+            replicas: Some(1),
+            selector: LabelSelector {
+                match_labels: Some(BTreeMap::new()),
+                ..Default::default()
+            },
+            template: PodTemplateSpec {
+                metadata: Some(ObjectMeta {
+                    labels: Some(BTreeMap::new()),
+                    ..Default::default()
+                }),
+                spec: Some(PodSpec {
+                    containers: vec![Container {
+                        name: name.clone(),
+                        image: Some("engula/journal:latest".into()),
+                        image_pull_policy: Some("IfNotPresent".into()),
+                        command: Some(vec!["journal".into()]),
+                        args: Some(vec![name.clone()]),
+                        env: Some(vec![
+                            EnvVar {
+                                name: "JOURNAL_NAME".into(),
+                                value: Some(name.clone()),
+                                ..Default::default()
+                            },
+                            EnvVar {
+                                name: "JOURNAL_NAMESPACE".into(),
+                                value: Some(ns.clone()),
+                                ..Default::default()
+                            },
+                        ]),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }),
+            },
+            ..Default::default()
+        }),
+        ..Default::default()
     };
     let ps = PostParams::default();
     let _o = deploys.create(&ps, &deploy).await.map_err(Error::KubeError)?;
